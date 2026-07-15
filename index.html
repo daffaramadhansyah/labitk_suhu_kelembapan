@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Monitoring Lab Terpadu</title>
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Supabase JS Client (untuk Realtime subscription) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Custom Style -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Navigation -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <i class="fa-solid fa-wind logo-icon"></i>
+                <div class="logo-text">
+                    <h2>LabMonitor</h2>
+                    <span>IoT Smart Lab</span>
+                </div>
+            </div>
+            
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="all">
+                    <i class="fa-solid fa-grip"></i> Semua Ruangan
+                </a>
+                <a href="#" class="nav-item" data-tab="lab1">
+                    <i class="fa-solid fa-flask"></i> Lab Terpadu 1
+                </a>
+                <a href="#" class="nav-item" data-tab="lab2">
+                    <i class="fa-solid fa-flask-vial"></i> Lab Terpadu 2
+                </a>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <span class="pulse-dot green"></span>
+                    <span>System Active</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="header">
+                <div class="header-title">
+                    <h1>Dashboard Monitoring Suhu & Kelembapan</h1>
+                    <p>Memantau 54 ruangan di Laboratorium Terpadu 1 & 2</p>
+                </div>
+                
+                <div class="header-actions">
+                    <div class="search-box">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="search-input" placeholder="Cari ruangan...">
+                    </div>
+                    
+                    <button class="btn-refresh" id="btn-refresh" title="Segarkan Data">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Stats Overview Cards -->
+            <section class="stats-grid">
+                <!-- Card 1 -->
+                <div class="stat-card">
+                    <div class="stat-icon bg-blue">
+                        <i class="fa-solid fa-door-open"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3>Total Ruangan</h3>
+                        <p class="stat-value" id="stat-total-rooms">54</p>
+                        <span class="stat-desc">25 Lab 1 | 29 Lab 2</span>
+                    </div>
+                </div>
+                <!-- Card 2 -->
+                <div class="stat-card">
+                    <div class="stat-icon bg-green">
+                        <i class="fa-solid fa-wifi"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3>Sensor Aktif</h3>
+                        <p class="stat-value" id="stat-active-sensors">0</p>
+                        <span class="stat-desc" id="stat-active-desc">Memuat status...</span>
+                    </div>
+                </div>
+                <!-- Card 3 -->
+                <div class="stat-card">
+                    <div class="stat-icon bg-orange">
+                        <i class="fa-solid fa-temperature-half"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3>Suhu Rata-rata</h3>
+                        <p class="stat-value" id="stat-avg-temp">--°C</p>
+                        <span class="stat-desc">Batas Aman: 20°C - 30°C</span>
+                    </div>
+                </div>
+                <!-- Card 4 -->
+                <div class="stat-card">
+                    <div class="stat-icon bg-teal">
+                        <i class="fa-solid fa-droplet"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3>Kelembapan Rata-rata</h3>
+                        <p class="stat-value" id="stat-avg-humi">--%</p>
+                        <span class="stat-desc">Batas Aman: 40% - 60%</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Filter Tabs & Controls -->
+            <div class="controls-bar">
+                <div class="tab-filters">
+                    <button class="filter-btn active" data-filter="all">Semua Ruangan</button>
+                    <button class="filter-btn" data-filter="normal">Normal</button>
+                    <button class="filter-btn" data-filter="warning">Peringatan</button>
+                    <button class="filter-btn" data-filter="offline">Offline</button>
+                </div>
+                <div class="last-updated">
+                    <i class="fa-regular fa-clock"></i> Update terakhir: <span id="last-updated-time">--:--:--</span>
+                </div>
+            </div>
+
+            <!-- Rooms Grid Section -->
+            <section class="rooms-grid" id="rooms-grid">
+                <!-- Ruangan akan dirender secara dinamis oleh JavaScript -->
+                <div class="loading-state">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                    <p>Memuat data sensor ruangan...</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Glassmorphic Detail Modal -->
+    <div class="modal-backdrop" id="detail-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div>
+                    <h2 id="modal-room-name">Nama Ruangan</h2>
+                    <span id="modal-room-lab" class="lab-badge">Lab Terpadu 1</span>
+                </div>
+                <button class="btn-close" id="btn-close-modal">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="modal-current-stats">
+                    <div class="modal-stat-box">
+                        <span class="label">Suhu Saat Ini</span>
+                        <span class="value" id="modal-curr-temp">--°C</span>
+                    </div>
+                    <div class="modal-stat-box">
+                        <span class="label">Kelembapan Saat Ini</span>
+                        <span class="value" id="modal-curr-humi">--%</span>
+                    </div>
+                    <div class="modal-stat-box">
+                        <span class="label">Status Perangkat</span>
+                        <span class="value status-badge" id="modal-curr-status">Online</span>
+                    </div>
+                </div>
+                
+                <div class="chart-container">
+                    <h3>Riwayat 20 Pembacaan Terakhir</h3>
+                    <canvas id="history-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Script -->
+    <script src="app.js"></script>
+</body>
+</html>
