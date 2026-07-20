@@ -237,6 +237,7 @@ body {
     cursor: pointer;
     font-size: 1rem;
     transition: var(--transition-smooth);
+    flex-shrink: 0;
 }
 
 .btn-refresh:hover {
@@ -283,6 +284,7 @@ body {
     align-items: center;
     justify-content: center;
     font-size: 1.4rem;
+    flex-shrink: 0;
 }
 
 .stat-icon.bg-blue {
@@ -350,6 +352,8 @@ body {
     font-size: 0.85rem;
     font-weight: 500;
     transition: var(--transition-smooth);
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .filter-btn:hover, .filter-btn.active {
@@ -368,6 +372,7 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
+    white-space: nowrap;
 }
 
 /* ROOMS GRID */
@@ -584,6 +589,8 @@ body {
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
     transform: translateY(20px);
     transition: var(--transition-smooth);
+    max-height: 85vh;
+    overflow-y: auto;
 }
 
 .modal-backdrop.active .modal-card {
@@ -678,16 +685,63 @@ body {
     border-radius: 12px;
     padding: 1.25rem;
     border: 1px solid var(--border-color);
+    position: relative;
+    height: 300px;
+}
+
+.chart-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.chart-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
 }
 
 .chart-container h3 {
     font-size: 0.9rem;
     font-weight: 600;
     color: var(--text-secondary);
-    margin-bottom: 12px;
 }
 
-/* RESPONSIVE DESIGN */
+.range-filters {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.range-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+    white-space: nowrap;
+}
+
+.range-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+}
+
+.range-btn.active {
+    background: var(--color-blue);
+    border-color: var(--color-blue);
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* ============================================================
+   RESPONSIVE DESIGN
+   ============================================================ */
 @media (max-width: 992px) {
     .sidebar {
         width: 80px;
@@ -717,65 +771,182 @@ body {
     }
 }
 
+/* --- MOBILE (<= 768px): sidebar jadi bottom-nav horizontal di atas --- */
 @media (max-width: 768px) {
+
+    .app-container {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        position: sticky;
+        top: 0;
+        width: 100%;
+        height: auto;
+        flex-direction: row;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        z-index: 50;
+        overflow-x: auto;
+    }
+
+    .logo-area, .sidebar-footer {
+        display: none;
+    }
+
+    .nav-menu {
+        flex-direction: row;
+        flex-grow: 0;
+        gap: 8px;
+        width: 100%;
+    }
+
+    .nav-item {
+        flex: 0 0 auto;
+        padding: 8px 14px;
+        font-size: 0.82rem;
+        white-space: nowrap;
+    }
+
+    .nav-item.active {
+        padding-left: 14px;
+        border-left: none;
+        border-bottom: 2px solid var(--color-blue);
+    }
+
+    .main-content {
+        margin-left: 0;
+        padding: 1.25rem 1rem;
+    }
+
+    /* Header: judul di atas, search+refresh 1 baris di bawahnya */
     .header {
         flex-direction: column;
-        align-items: flex-start;
-        gap: 1rem;
+        align-items: stretch;
+        gap: 0.85rem;
+        margin-bottom: 1.5rem;
     }
-    
+
+    .header-title h1 {
+        font-size: 1.35rem;
+    }
+
+    .header-title p {
+        font-size: 0.85rem;
+    }
+
     .header-actions {
         width: 100%;
-        justify-content: space-between;
+        align-items: stretch;
     }
-    
+
     .search-box {
         flex-grow: 1;
     }
-    
-    .search-box input {
-        width: 100%;
-    }
-    
+
+    .search-box input,
     .search-box input:focus {
         width: 100%;
     }
-    
+
+    /* Stat card dibikin lebih ringkas biar tidak makan scroll */
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+        padding: 1rem;
+        gap: 12px;
+    }
+
+    .stat-icon {
+        width: 42px;
+        height: 42px;
+        font-size: 1.1rem;
+    }
+
+    .stat-value {
+        font-size: 1.3rem;
+    }
+
+    .stat-info h3 {
+        font-size: 0.75rem;
+    }
+
+    .stat-desc {
+        font-size: 0.68rem;
+    }
+
+    /* Filter bar: scroll horizontal, tidak wrap acak-acakan */
     .controls-bar {
         flex-direction: column;
-        align-items: flex-start;
-        gap: 1rem;
+        align-items: stretch;
+        gap: 0.75rem;
     }
-    
+
+    .tab-filters {
+        overflow-x: auto;
+        padding-bottom: 4px;
+    }
+
+    .last-updated {
+        font-size: 0.72rem;
+    }
+
+    .rooms-grid {
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+    }
+
+    /* Modal jadi hampir full-screen */
+    .modal-card {
+        width: 94%;
+        padding: 1.25rem;
+        max-height: 92vh;
+    }
+
+    .modal-current-stats {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+    }
+
+    .modal-stat-box {
+        padding: 8px 4px;
+    }
+
+    .modal-stat-box .value {
+        font-size: 1rem;
+    }
+
+    .chart-header-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .range-filters {
+        width: 100%;
+    }
+
+    .range-btn {
+        flex: 1;
+        text-align: center;
+        padding: 6px 4px;
+    }
+
+    .chart-container {
+        height: 220px;
+        padding: 0.85rem;
+    }
+}
+
+@media (max-width: 400px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+
     .modal-current-stats {
         grid-template-columns: 1fr;
     }
 }
-
-/* ============================================================
-   FIX: Chart.js "menjalar" tak terbatas di modal detail ruangan
-   Tambahkan di paling bawah style.css
-   ============================================================ */
- 
-.modal-card {
-  max-height: 85vh;
-  overflow-y: auto;
-}
- 
-.chart-container {
-  position: relative;
-  width: 100%;
-  height: 300px;      /* kunci utama: kasih tinggi PASTI, jangan auto */
-  max-height: 300px;
-}
- 
-.chart-container canvas {
-  width: 100% !important;
-  height: 100% !important;
-}
- 
-
-
-
-
-

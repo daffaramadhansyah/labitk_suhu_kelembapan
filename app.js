@@ -5,9 +5,11 @@ const SUPABASE_ANON_KEY   = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdX
 // ==============================================================
 
 const API_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co/rest/v1`;
-const POLL_INTERVAL = 60000; // fallback poll (jarang), realtime yang jadi andalan utama
+// CATATAN: Realtime (WebSocket) diblokir jaringan kampus, jadi pakai polling cepat sebagai gantinya.
+// ESP32 kirim data tiap 5 detik, jadi polling di sini disamakan supaya tidak ada delay berarti.
+const POLL_INTERVAL = 5000;
 
-// Client Supabase (untuk fitur Realtime)
+// Client Supabase (disimpan untuk kebutuhan lain, realtime subscription di-nonaktifkan)
 const supabaseClient = window.supabase.createClient(
     `https://${SUPABASE_PROJECT_ID}.supabase.co`,
     SUPABASE_ANON_KEY
@@ -52,8 +54,8 @@ const filterBtns = document.querySelectorAll(".filter-btn");
 document.addEventListener("DOMContentLoaded", () => {
     initEventListeners();
     fetchData();
-    startPolling();     // tetap ada sebagai fallback (jarang, tiap 60 detik)
-    setupRealtime();    // ini yang bikin update instan tiap ada data baru
+    startPolling();     // polling cepat (5 detik), andalan utama karena WebSocket diblokir jaringan
+    // setupRealtime(); // dinonaktifkan sementara: wss:// diblokir firewall jaringan kampus
 });
 
 // ==========================================
@@ -130,6 +132,20 @@ function initEventListeners() {
             btn.classList.add("active");
             currentFilter = btn.getAttribute("data-filter");
             applyFilters();
+        });
+    });
+
+    // Filter rentang waktu di modal detail (5 Menit / 1 Jam / 12 Jam / 24 Jam)
+    document.querySelectorAll('.range-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            currentRangeMinutes = parseInt(btn.dataset.range);
+            const kodeSensor = modalRoomName.dataset.kodeSensor;
+            if (kodeSensor) {
+                loadChartForRange(kodeSensor, currentRangeMinutes);
+            }
         });
     });
 
@@ -276,7 +292,7 @@ function checkIsOffline(room) {
 // GET STATUS TEXT BASED ON TEMP & HUMIDITY
 function getStatusLabel(temp, humi) {
     if (temp === null) return "offline";
-    if (temp > 28 || temp < 18 || humi > 70 || humi < 30) {
+    if (temp > 33 || temp < 18 || humi > 70 || humi < 30) {
         return "danger"; 
     } else if (temp > 30 || temp < 20 || humi > 60 || humi < 40) {
         return "warning"; 
@@ -307,7 +323,7 @@ function renderRooms() {
         card.addEventListener("click", () => openModal(room.kode_sensor));
         
         const tempText = isOffline ? "--" : `${room.suhu.toFixed(1)}°C`;
-        const humiText = isOffline ? "--" : `${room.kelembapan.toFixed(0)}%`;
+        const humiText = isOffline ? "--" : `${room.kelembapan.toFixed(1)}%`;
         
         let timeAgoText = "Belum ada data";
         if (room.waktu) {
@@ -348,9 +364,16 @@ function renderRooms() {
 }
 
 // MODAL CONTROLS
+let currentRangeMinutes = 60; // default: 1 jam
+
 async function openModal(kodeSensor) {
     detailModal.classList.add("active");
-    
+    currentRangeMinutes = 60; // reset ke default tiap buka modal baru
+
+    document.querySelectorAll('.range-btn').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.range) === currentRangeMinutes);
+    });
+
     modalRoomName.textContent = "Memuat data...";
     modalCurrTemp.textContent = "--°C";
     modalCurrHumi.textContent = "--%";
@@ -379,52 +402,70 @@ async function openModal(kodeSensor) {
         modalCurrStatus.textContent = "Offline";
     } else {
         modalCurrTemp.textContent = `${room.suhu.toFixed(1)}°C`;
-        modalCurrHumi.textContent = `${room.kelembapan.toFixed(0)}%`;
+        modalCurrHumi.textContent = `${room.kelembapan.toFixed(1)}%`;
         
         const statusLabel = getStatusLabel(room.suhu, room.kelembapan);
         modalCurrStatus.className = `value status-badge ${statusLabel}`;
         modalCurrStatus.textContent = statusLabel.toUpperCase();
     }
-    
+
+    await loadChartForRange(kodeSensor, currentRangeMinutes, room);
+}
+
+// Setiap "titik" grafik selalu berjumlah segini, tinggal ukuran bucket-nya yang beda per tombol
+const BUCKET_POINTS = 12;
+
+// Dipanggil tiap kali tombol rentang waktu diklik.
+// bucketMinutes = ukuran 1 "blok" data (mis. 5 menit / 1 jam / 12 jam),
+// total rentang yang ditampilkan = bucketMinutes x 12.
+async function loadChartForRange(kodeSensor, bucketMinutes, roomFallback) {
+    const room = roomFallback || roomsData.find(r => r.kode_sensor === kodeSensor);
+
     if (SUPABASE_PROJECT_ID === "YOUR_SUPABASE_PROJECT_ID" || SUPABASE_ANON_KEY === "YOUR_SUPABASE_ANON_KEY") {
-        const startTemp = room.suhu || 24;
-        const startHumi = room.kelembapan || 50;
+        const startTemp = (room && room.suhu) || 24;
+        const startHumi = (room && room.kelembapan) || 50;
         renderChart(generateMockHistory(startTemp, startHumi));
         return;
     }
 
     try {
-        const url = `${API_URL}/data_sensor?kode_sensor=eq.${kodeSensor}&order=waktu.desc&limit=20`;
-        
-        const response = await fetch(url, {
-            method: "GET",
-            headers: {
-                "apikey": SUPABASE_ANON_KEY,
-                "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-                "Content-Type": "application/json"
-            }
+        const { data, error } = await supabaseClient.rpc('get_bucketed_readings', {
+            p_kode_sensor: kodeSensor,
+            p_bucket_minutes: bucketMinutes,
+            p_num_buckets: BUCKET_POINTS
         });
 
-        if (!response.ok) throw new Error("HTTP Error");
+        if (error) throw error;
 
-        const json = await response.json();
-        
-        const history = json.map(row => {
-            const time = new Date(row.waktu);
+        // Bucket kosong (tidak ada data di rentang itu) dilewati, bukan dianggap 0
+        const rows = (data || []).filter(r => r.avg_suhu !== null && r.avg_kelembapan !== null);
+
+        // Tampilkan tanggal juga di label kalau ukuran bucket-nya besar (1 Jam / 12 Jam),
+        // supaya jelas walau rentangnya melewati pergantian hari
+        const useDateLabel = bucketMinutes >= 60;
+
+        const history = rows.map(row => {
+            const time = new Date(row.bucket_start);
+            const jam = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+            const label = useDateLabel
+                ? `${String(time.getDate()).padStart(2, '0')}/${String(time.getMonth() + 1).padStart(2, '0')} ${jam}`
+                : jam;
             return {
-                suhu: parseFloat(row.suhu),
-                kelembapan: parseFloat(row.kelembapan),
-                waktu: `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
+                suhu: parseFloat(row.avg_suhu),
+                kelembapan: parseFloat(row.avg_kelembapan),
+                waktu: label
             };
         });
 
-        renderChart(history.reverse());
+        if (history.length === 0) {
+            renderChart([]); // chart kosong, ada penanganan "belum ada data" di renderChart
+            return;
+        }
 
-    } catch (e) {
-        console.warn("Gagal fetch data detail historis, menggunakan data simulasi...", e);
-        const startTemp = room.suhu || 24;
-        const startHumi = room.kelembapan || 50;
-        renderChart(generateMockHistory(startTemp, startHumi));
+        renderChart(history);
+    } catch (err) {
+        console.error('Gagal mengambil data histori:', err);
+        renderChart([]);
     }
 }
 
@@ -444,7 +485,7 @@ function refreshModalLiveValues(room) {
         modalCurrStatus.textContent = "Offline";
     } else {
         modalCurrTemp.textContent = `${room.suhu.toFixed(1)}°C`;
-        modalCurrHumi.textContent = `${room.kelembapan.toFixed(0)}%`;
+        modalCurrHumi.textContent = `${room.kelembapan.toFixed(1)}%`;
 
         const statusLabel = getStatusLabel(room.suhu, room.kelembapan);
         modalCurrStatus.className = `value status-badge ${statusLabel}`;
@@ -454,6 +495,14 @@ function refreshModalLiveValues(room) {
 
 // RENDER CHART.JS LINE GRAPH
 function renderChart(history) {
+    // WAJIB: hancurkan instance chart lama dulu sebelum bikin yang baru,
+    // kalau tidak Chart.js akan gagal render chart baru di canvas yang sama
+    // (menyebabkan chart lama tetap "nyangkut" di layar meski data baru sudah di-fetch)
+    if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+    }
+
     const ctx = document.getElementById('history-chart').getContext('2d');
     
     const labels = history.map(item => item.waktu);
@@ -473,7 +522,9 @@ function renderChart(history) {
                     borderWidth: 2,
                     tension: 0.3,
                     yAxisID: 'y-temp',
-                    fill: true
+                    fill: true,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
                 },
                 {
                     label: 'Kelembapan (%)',
@@ -483,7 +534,9 @@ function renderChart(history) {
                     borderWidth: 2,
                     tension: 0.3,
                     yAxisID: 'y-humi',
-                    fill: true
+                    fill: true,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
                 }
             ]
         },
@@ -498,7 +551,12 @@ function renderChart(history) {
             scales: {
                 x: {
                     grid: { color: 'rgba(255,255,255,0.03)' },
-                    ticks: { color: '#94a3b8' }
+                    ticks: {
+                        color: '#94a3b8',
+                        maxTicksLimit: 8,
+                        autoSkip: true,
+                        maxRotation: 0
+                    }
                 },
                 'y-temp': {
                     type: 'linear',
