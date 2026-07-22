@@ -739,6 +739,149 @@ body {
     font-weight: 600;
 }
 
+.chart-empty-msg {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-secondary);
+    text-align: center;
+    gap: 10px;
+    padding: 20px;
+}
+
+.chart-empty-msg i {
+    font-size: 2rem;
+    color: var(--color-red);
+    opacity: 0.6;
+}
+
+.chart-empty-msg span {
+    font-size: 0.85rem;
+    max-width: 320px;
+}
+
+.downtime-section {
+    margin-top: 1.25rem;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+}
+
+.downtime-section h3 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.downtime-section h3 i {
+    color: var(--color-red);
+}
+
+.downtime-scroll {
+    max-height: 180px;
+    overflow-y: auto;
+    border-radius: 8px;
+}
+
+.downtime-scroll table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.downtime-scroll thead th {
+    position: sticky;
+    top: 0;
+    background: #0f172a;
+    text-align: left;
+    padding: 6px 10px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.downtime-scroll tbody td {
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.downtime-scroll .empty-log {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 14px;
+}
+
+.downtime-ongoing {
+    color: var(--color-red);
+    font-weight: 600;
+}
+
+.report-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 1.25rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.report-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.report-label i {
+    color: #ef4444;
+}
+
+#report-range {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    outline: none;
+}
+
+.btn-download-report {
+    background: var(--color-blue);
+    border: none;
+    color: #fff;
+    padding: 9px 16px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: var(--transition-smooth);
+}
+
+.btn-download-report:hover:not(:disabled) {
+    background: #2563eb;
+    transform: translateY(-2px);
+}
+
+.btn-download-report:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
 /* ============================================================
    RESPONSIVE DESIGN
    ============================================================ */
@@ -938,6 +1081,17 @@ body {
     .chart-container {
         height: 220px;
         padding: 0.85rem;
+    }
+
+    .report-section {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #report-range,
+    .btn-download-report {
+        width: 100%;
+        justify-content: center;
     }
 }
 

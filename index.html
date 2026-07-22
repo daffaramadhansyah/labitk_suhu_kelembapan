@@ -18,6 +18,14 @@
 
     <!-- Supabase JS Client (untuk Realtime subscription) -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- jsPDF + AutoTable (untuk generate laporan PDF) -->
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- jsPDF (untuk generate laporan PDF) -->
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
     
     <!-- Custom Style -->
     <link rel="stylesheet" href="style.css">
@@ -186,6 +194,35 @@
                         </div>
                     </div>
                     <canvas id="history-chart"></canvas>
+                </div>
+
+                <div class="downtime-section">
+                    <h3><i class="fa-solid fa-plug-circle-xmark"></i> Riwayat Perangkat Mati (5 Kejadian Terakhir)</h3>
+                    <div class="downtime-scroll">
+                        <table>
+                            <thead>
+                                <tr><th>Waktu Mati</th><th>Durasi</th></tr>
+                            </thead>
+                            <tbody id="downtime-body">
+                                <tr><td colspan="2" class="empty-log">Memuat...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="report-section">
+                    <div class="report-label">
+                        <i class="fa-solid fa-file-pdf"></i>
+                        <span>Unduh Laporan</span>
+                    </div>
+                    <select id="report-range">
+                        <option value="1d">1 Hari (data per 5 menit)</option>
+                        <option value="7d">7 Hari (data per 1 jam)</option>
+                        <option value="30d">30 Hari (data per 6 jam)</option>
+                    </select>
+                    <button class="btn-download-report" id="btn-download-report">
+                        <i class="fa-solid fa-download"></i> Download PDF
+                    </button>
                 </div>
             </div>
         </div>

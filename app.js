@@ -45,6 +45,8 @@ const modalRoomLab = document.getElementById("modal-room-lab");
 const modalCurrTemp = document.getElementById("modal-curr-temp");
 const modalCurrHumi = document.getElementById("modal-curr-humi");
 const modalCurrStatus = document.getElementById("modal-curr-status");
+const reportRangeSelect = document.getElementById("report-range");
+const btnDownloadReport = document.getElementById("btn-download-report");
 
 // Sidebar & sub-header filter buttons
 const navItems = document.querySelectorAll(".nav-item");
@@ -135,7 +137,7 @@ function initEventListeners() {
         });
     });
 
-    // Filter rentang waktu di modal detail (5 Menit / 1 Jam / 12 Jam / 24 Jam)
+    // Filter rentang waktu di modal detail (5 Menit / 1 Jam / 12 Jam)
     document.querySelectorAll('.range-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
@@ -147,6 +149,13 @@ function initEventListeners() {
                 loadChartForRange(kodeSensor, currentRangeMinutes);
             }
         });
+    });
+
+    // Download laporan PDF
+    btnDownloadReport.addEventListener("click", () => {
+        const kodeSensor = modalRoomName.dataset.kodeSensor;
+        if (!kodeSensor) return;
+        generateReport(kodeSensor, reportRangeSelect.value);
     });
 
     // Modal close
@@ -285,8 +294,10 @@ function checkIsOffline(room) {
     if (!room.waktu || room.suhu === null) return true;
     const now = new Date();
     const lastUpdate = new Date(room.waktu);
-    const diffMinutes = (now - lastUpdate) / 1000 / 60;
-    return diffMinutes > 15;
+    const diffSeconds = (now - lastUpdate) / 1000;
+    // ESP32 normalnya kirim data tiap 5 detik, jadi 30 detik tanpa data baru
+    // (6x lipat interval normal) sudah tanda kuat perangkat benar-benar mati
+    return diffSeconds > 30;
 }
 
 // GET STATUS TEXT BASED ON TEMP & HUMIDITY
@@ -365,6 +376,8 @@ function renderRooms() {
 
 // MODAL CONTROLS
 let currentRangeMinutes = 60; // default: 1 jam
+let modalRefreshTimer = null;
+const MODAL_CHART_REFRESH_MS = 15000; // refresh chart di background tiap 15 detik selagi modal terbuka
 
 async function openModal(kodeSensor) {
     detailModal.classList.add("active");
@@ -410,6 +423,15 @@ async function openModal(kodeSensor) {
     }
 
     await loadChartForRange(kodeSensor, currentRangeMinutes, room);
+    loadDowntimeHistory(kodeSensor);
+
+    // Auto-refresh chart & riwayat downtime di background, tanpa perlu reload apapun
+    if (modalRefreshTimer) clearInterval(modalRefreshTimer);
+    modalRefreshTimer = setInterval(() => {
+        if (!detailModal.classList.contains('active')) return;
+        loadChartForRange(kodeSensor, currentRangeMinutes, room);
+        loadDowntimeHistory(kodeSensor);
+    }, MODAL_CHART_REFRESH_MS);
 }
 
 // Setiap "titik" grafik selalu berjumlah segini, tinggal ukuran bucket-nya yang beda per tombol
@@ -437,8 +459,10 @@ async function loadChartForRange(kodeSensor, bucketMinutes, roomFallback) {
 
         if (error) throw error;
 
-        // Bucket kosong (tidak ada data di rentang itu) dilewati, bukan dianggap 0
-        const rows = (data || []).filter(r => r.avg_suhu !== null && r.avg_kelembapan !== null);
+        // Semua bucket dipertahankan (termasuk yang kosong) supaya sumbu waktu tetap
+        // benar merepresentasikan "sekarang mundur ke belakang" secara utuh, bukan
+        // cuma nampilin titik yang kebetulan ada datanya. Bucket kosong = celah/gap.
+        const rows = data || [];
 
         // Tampilkan tanggal juga di label kalau ukuran bucket-nya besar (1 Jam / 12 Jam),
         // supaya jelas walau rentangnya melewati pergantian hari
@@ -451,8 +475,8 @@ async function loadChartForRange(kodeSensor, bucketMinutes, roomFallback) {
                 ? `${String(time.getDate()).padStart(2, '0')}/${String(time.getMonth() + 1).padStart(2, '0')} ${jam}`
                 : jam;
             return {
-                suhu: parseFloat(row.avg_suhu),
-                kelembapan: parseFloat(row.avg_kelembapan),
+                suhu: row.avg_suhu !== null ? parseFloat(row.avg_suhu) : null,
+                kelembapan: row.avg_kelembapan !== null ? parseFloat(row.avg_kelembapan) : null,
                 waktu: label
             };
         });
@@ -469,9 +493,269 @@ async function loadChartForRange(kodeSensor, bucketMinutes, roomFallback) {
     }
 }
 
+// ==========================================
+// RIWAYAT PERANGKAT MATI (DOWNTIME)
+// ==========================================
+async function loadDowntimeHistory(kodeSensor) {
+    const tbody = document.getElementById('downtime-body');
+    tbody.innerHTML = '<tr><td colspan="2" class="empty-log">Memuat...</td></tr>';
+
+    if (SUPABASE_PROJECT_ID === "YOUR_SUPABASE_PROJECT_ID") {
+        tbody.innerHTML = '<tr><td colspan="2" class="empty-log">Belum dikonfigurasi</td></tr>';
+        return;
+    }
+
+    try {
+        const { data, error } = await supabaseClient.rpc('get_downtime_history', {
+            p_kode_sensor: kodeSensor,
+            p_days_back: 7,
+            p_gap_threshold_seconds: 30
+        });
+
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="2" class="empty-log">Tidak ada catatan perangkat mati dalam 7 hari terakhir 🎉</td></tr>';
+            return;
+        }
+
+        const fmt = (iso) => {
+            const d = new Date(iso);
+            const tgl = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+            const jam = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            return `${tgl} ${jam}`;
+        };
+
+        const fmtDuration = (minutes, isOngoing) => {
+            const durasiText = minutes < 60
+                ? `${minutes.toFixed(0)} menit`
+                : `${Math.floor(minutes / 60)} jam ${Math.round(minutes % 60)} menit`;
+            return isOngoing
+                ? `<span class="downtime-ongoing">Masih offline (${durasiText})</span>`
+                : durasiText;
+        };
+
+        // Cuma 5 kejadian offline paling baru yang ditampilkan
+        tbody.innerHTML = data.slice(0, 5).map(row => `
+            <tr>
+                <td>${fmt(row.offline_start)}</td>
+                <td>${fmtDuration(parseFloat(row.duration_minutes), !row.offline_end)}</td>
+            </tr>
+        `).join('');
+
+    } catch (err) {
+        console.error('Gagal ambil riwayat downtime:', err);
+        tbody.innerHTML = '<tr><td colspan="2" class="empty-log">Gagal memuat data</td></tr>';
+    }
+}
+
 function closeModal() {
     detailModal.classList.remove("active");
     delete modalRoomName.dataset.kodeSensor;
+    if (modalRefreshTimer) {
+        clearInterval(modalRefreshTimer);
+        modalRefreshTimer = null;
+    }
+}
+
+// ==========================================
+// GENERATE LAPORAN PDF
+// ==========================================
+
+// Konfigurasi tiap opsi rentang: ukuran bucket (menit) & jumlah titik data
+const REPORT_CONFIG = {
+    "1d": { bucketMinutes: 5, numBuckets: 288, label: "1 Hari Terakhir" },   // 5 menit x 288 = 24 jam
+    "7d": { bucketMinutes: 60, numBuckets: 168, label: "7 Hari Terakhir" }, // 1 jam x 168 = 7 hari
+    "30d": { bucketMinutes: 360, numBuckets: 120, label: "30 Hari Terakhir" } // 6 jam x 120 = 30 hari
+};
+
+async function generateReport(kodeSensor, rangeKey) {
+    const config = REPORT_CONFIG[rangeKey];
+    const room = roomsData.find(r => r.kode_sensor === kodeSensor);
+    if (!config || !room) return;
+
+    // Kasih feedback visual di tombol selagi proses (bisa beberapa detik untuk rentang 30 hari)
+    const originalBtnHtml = btnDownloadReport.innerHTML;
+    btnDownloadReport.disabled = true;
+    btnDownloadReport.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyiapkan laporan...';
+
+    try {
+        const { data, error } = await supabaseClient.rpc('get_bucketed_readings', {
+            p_kode_sensor: kodeSensor,
+            p_bucket_minutes: config.bucketMinutes,
+            p_num_buckets: config.numBuckets
+        });
+
+        if (error) throw error;
+
+        const rows = (data || []).filter(r => r.avg_suhu !== null && r.avg_kelembapan !== null);
+
+        if (rows.length === 0) {
+            alert("Belum ada data untuk rentang waktu ini. Laporan tidak bisa dibuat.");
+            return;
+        }
+
+        // Format waktu untuk tiap baris (selalu tampilkan tanggal+jam, karena rentang laporan panjang)
+        const formatted = rows.map(row => {
+            const d = new Date(row.bucket_start);
+            const tgl = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+            const jam = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            return {
+                tanggalJam: `${tgl} ${jam}`,
+                suhu: parseFloat(row.avg_suhu),
+                kelembapan: parseFloat(row.avg_kelembapan)
+            };
+        });
+
+        // Hitung ringkasan statistik
+        const suhuArr = formatted.map(r => r.suhu);
+        const humiArr = formatted.map(r => r.kelembapan);
+        const stats = {
+            suhuMin: Math.min(...suhuArr).toFixed(1),
+            suhuMax: Math.max(...suhuArr).toFixed(1),
+            suhuAvg: (suhuArr.reduce((a, b) => a + b, 0) / suhuArr.length).toFixed(1),
+            humiMin: Math.min(...humiArr).toFixed(1),
+            humiMax: Math.max(...humiArr).toFixed(1),
+            humiAvg: (humiArr.reduce((a, b) => a + b, 0) / humiArr.length).toFixed(1)
+        };
+
+        // Render chart sementara (tidak ditampilkan ke user) untuk diambil sebagai gambar di PDF
+        const chartImage = await renderOffscreenChart(formatted);
+
+        buildPdf(room, config, formatted, stats, chartImage);
+
+    } catch (err) {
+        console.error("Gagal membuat laporan:", err);
+        alert("Gagal membuat laporan. Coba lagi beberapa saat.");
+    } finally {
+        btnDownloadReport.disabled = false;
+        btnDownloadReport.innerHTML = originalBtnHtml;
+    }
+}
+
+// Bikin chart di canvas tersembunyi, lalu ambil sebagai gambar (dataURL) untuk ditempel di PDF
+function renderOffscreenChart(formatted) {
+    return new Promise((resolve) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 900;
+        canvas.height = 400;
+        canvas.style.display = 'none';
+        document.body.appendChild(canvas);
+
+        const chart = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: formatted.map(r => r.tanggalJam),
+                datasets: [
+                    {
+                        label: 'Suhu (°C)',
+                        data: formatted.map(r => r.suhu),
+                        borderColor: '#d97706',
+                        backgroundColor: 'rgba(217, 119, 6, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.3,
+                        yAxisID: 'y-temp',
+                        fill: true
+                    },
+                    {
+                        label: 'Kelembapan (%)',
+                        data: formatted.map(r => r.kelembapan),
+                        borderColor: '#0d9488',
+                        backgroundColor: 'rgba(13, 148, 136, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.3,
+                        yAxisID: 'y-humi',
+                        fill: true
+                    }
+                ]
+            },
+            options: {
+                responsive: false,
+                animation: false,
+                plugins: {
+                    legend: { labels: { color: '#1e293b' } }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: '#1e293b', maxTicksLimit: 10, autoSkip: true, maxRotation: 0 },
+                        grid: { color: '#e2e8f0' }
+                    },
+                    'y-temp': {
+                        type: 'linear', position: 'left',
+                        ticks: { color: '#d97706' },
+                        title: { display: true, text: 'Suhu (°C)', color: '#d97706' }
+                    },
+                    'y-humi': {
+                        type: 'linear', position: 'right',
+                        grid: { display: false },
+                        ticks: { color: '#0d9488' },
+                        title: { display: true, text: 'Kelembapan (%)', color: '#0d9488' }
+                    }
+                }
+            }
+        });
+
+        // Chart.js dengan animation:false sudah langsung ter-render sinkron
+        const imgData = chart.toBase64Image('image/png', 1.0);
+        chart.destroy();
+        document.body.removeChild(canvas);
+        resolve(imgData);
+    });
+}
+
+function buildPdf(room, config, formatted, stats, chartImage) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const now = new Date();
+    const generatedAt = now.toLocaleString('id-ID');
+
+    // Header
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.text('Laporan Monitoring Suhu & Kelembapan', pageWidth / 2, 18, { align: 'center' });
+
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'normal');
+    doc.text(`${room.nama_ruangan} (${room.laboratorium})`, pageWidth / 2, 25, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.text(`Kode Sensor: ${room.kode_sensor}  |  Rentang: ${config.label}  |  Dibuat: ${generatedAt}`, pageWidth / 2, 31, { align: 'center' });
+    doc.setTextColor(0);
+
+    // Ringkasan statistik
+    let y = 40;
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.text('Ringkasan', 14, y);
+    y += 6;
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    doc.text(`Suhu — Min: ${stats.suhuMin}°C   Max: ${stats.suhuMax}°C   Rata-rata: ${stats.suhuAvg}°C`, 14, y);
+    y += 5;
+    doc.text(`Kelembapan — Min: ${stats.humiMin}%   Max: ${stats.humiMax}%   Rata-rata: ${stats.humiAvg}%`, 14, y);
+    y += 8;
+
+    // Grafik
+    const imgWidth = pageWidth - 28;
+    const imgHeight = imgWidth * (400 / 900);
+    doc.addImage(chartImage, 'PNG', 14, y, imgWidth, imgHeight);
+    y += imgHeight + 8;
+
+    // Tabel data lengkap (auto lanjut ke halaman baru kalau panjang)
+    doc.autoTable({
+        startY: y,
+        head: [['Waktu', 'Suhu (°C)', 'Kelembapan (%)']],
+        body: formatted.map(r => [r.tanggalJam, r.suhu.toFixed(1), r.kelembapan.toFixed(1)]),
+        styles: { fontSize: 8, cellPadding: 1.5 },
+        headStyles: { fillColor: [59, 130, 246] },
+        margin: { left: 14, right: 14 }
+    });
+
+    const fileName = `Laporan_${room.kode_sensor}_${config.label.replace(/\s+/g, '')}.pdf`;
+    doc.save(fileName);
 }
 
 // Update angka live di modal (dipanggil dari realtime handler, tanpa reload chart)
@@ -503,11 +787,33 @@ function renderChart(history) {
         chartInstance = null;
     }
 
-    const ctx = document.getElementById('history-chart').getContext('2d');
-    
+    const chartWrapper = document.getElementById('history-chart').parentElement;
+    let emptyMsg = document.getElementById('chart-empty-msg');
+
     const labels = history.map(item => item.waktu);
     const temps = history.map(item => item.suhu);
     const humis = history.map(item => item.kelembapan);
+
+    // Kalau SEMUA titik kosong (perangkat mati sepanjang rentang ini), kasih pesan jelas
+    const adaData = temps.some(v => v !== null) || humis.some(v => v !== null);
+
+    if (!adaData) {
+        document.getElementById('history-chart').style.display = 'none';
+        if (!emptyMsg) {
+            emptyMsg = document.createElement('div');
+            emptyMsg.id = 'chart-empty-msg';
+            emptyMsg.className = 'chart-empty-msg';
+            chartWrapper.appendChild(emptyMsg);
+        }
+        emptyMsg.innerHTML = '<i class="fa-solid fa-plug-circle-xmark"></i><span>Tidak ada data pada rentang ini — kemungkinan perangkat sedang/sempat mati</span>';
+        emptyMsg.style.display = 'flex';
+        return;
+    }
+
+    if (emptyMsg) emptyMsg.style.display = 'none';
+    document.getElementById('history-chart').style.display = 'block';
+
+    const ctx = document.getElementById('history-chart').getContext('2d');
     
     chartInstance = new Chart(ctx, {
         type: 'line',
@@ -524,7 +830,8 @@ function renderChart(history) {
                     yAxisID: 'y-temp',
                     fill: true,
                     pointRadius: 0,
-                    pointHoverRadius: 4
+                    pointHoverRadius: 4,
+                    spanGaps: false
                 },
                 {
                     label: 'Kelembapan (%)',
@@ -536,16 +843,38 @@ function renderChart(history) {
                     yAxisID: 'y-humi',
                     fill: true,
                     pointRadius: 0,
-                    pointHoverRadius: 4
+                    pointHoverRadius: 4,
+                    spanGaps: false
                 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
             plugins: {
                 legend: {
                     labels: { color: '#94a3b8', font: { family: 'Inter' } }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    titleColor: '#f8fafc',
+                    bodyColor: '#e2e8f0',
+                    borderColor: 'rgba(255,255,255,0.1)',
+                    borderWidth: 1,
+                    padding: 10,
+                    displayColors: true,
+                    callbacks: {
+                        label: function(context) {
+                            const val = context.parsed.y;
+                            if (val === null || val === undefined) return `${context.dataset.label}: tidak ada data`;
+                            const unit = context.dataset.label.includes('Suhu') ? '°C' : '%';
+                            return `${context.dataset.label}: ${val.toFixed(1)}${unit}`;
+                        }
+                    }
                 }
             },
             scales: {
