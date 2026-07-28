@@ -206,8 +206,12 @@ async function fetchData() {
         });
 
     } catch (error) {
-        console.error("Gagal mengambil data dari Supabase, menggunakan data simulasi...", error);
-        roomsData = generateMockRooms();
+        // PENTING: kalau fetch gagal (hiccup jaringan sesaat, dsb), JANGAN timpa
+        // data asli dengan data simulasi acak - itu bikin dashboard kelihatan
+        // "offline palsu" padahal device sebenarnya baik-baik saja dan datanya
+        // tetap normal tersimpan di database. Biarkan data terakhir yang valid
+        // tetap tampil, nanti otomatis pulih di siklus polling berikutnya (5 detik lagi).
+        console.error("Gagal mengambil data dari Supabase (kemungkinan hiccup jaringan sesaat). Mempertahankan data terakhir yang valid...", error);
     }
     
     updateStats();
