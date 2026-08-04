@@ -177,31 +177,41 @@ async function fetchData() {
     }
 
     try {
-        const url = `${API_URL}/ruangan?select=*,data_sensor(suhu,kelembapan,waktu)&data_sensor.order=waktu.desc&data_sensor.limit=1`;
-        
-        const response = await fetch(url, {
-            method: "GET",
-            headers: {
-                "apikey": SUPABASE_ANON_KEY,
-                "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-                "Content-Type": "application/json"
-            }
-        });
+        // Dulu pakai 1 query "embed" (ruangan + data_sensor tergabung) yang berat
+        // dan bikin timeout begitu data_sensor sudah jutaan baris. Sekarang dipecah
+        // jadi 2 fetch ringan: daftar ruangan + data terbaru tiap sensor (dari view
+        // "latest_readings" yang sudah dioptimasi pakai index), lalu digabung di JS.
+        const headers = {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+            "Content-Type": "application/json"
+        };
 
-        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-        
-        const json = await response.json();
-        
-        roomsData = json.map(room => {
-            const latestSensor = room.data_sensor && room.data_sensor.length > 0 ? room.data_sensor[0] : null;
+        const [roomsRes, readingsRes] = await Promise.all([
+            fetch(`${API_URL}/ruangan?select=id_ruangan,nama_ruangan,laboratorium,kode_sensor`, { headers }),
+            fetch(`${API_URL}/latest_readings`, { headers })
+        ]);
+
+        if (!roomsRes.ok) throw new Error(`HTTP Error (ruangan): ${roomsRes.status}`);
+        if (!readingsRes.ok) throw new Error(`HTTP Error (latest_readings): ${readingsRes.status}`);
+
+        const rooms = await roomsRes.json();
+        const readings = await readingsRes.json();
+
+        // Bikin lookup cepat: kode_sensor -> data terbaru
+        const readingMap = {};
+        readings.forEach(r => { readingMap[r.kode_sensor] = r; });
+
+        roomsData = rooms.map(room => {
+            const latest = readingMap[room.kode_sensor] || null;
             return {
                 id_ruangan: room.id_ruangan,
                 nama_ruangan: room.nama_ruangan,
                 laboratorium: room.laboratorium,
                 kode_sensor: room.kode_sensor,
-                suhu: latestSensor ? parseFloat(latestSensor.suhu) : null,
-                kelembapan: latestSensor ? parseFloat(latestSensor.kelembapan) : null,
-                waktu: latestSensor ? latestSensor.waktu : null
+                suhu: latest ? parseFloat(latest.suhu) : null,
+                kelembapan: latest ? parseFloat(latest.kelembapan) : null,
+                waktu: latest ? latest.waktu : null
             };
         });
 
